@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static java.util.stream.Collectors.groupingBy;
+
 public class BooleanSearchEngine implements SearchEngine {
     private final Map<String, List<PageEntry>> allWordsEntriesMap = new HashMap<>();
     private final File stopWords = new File("stop-ru.txt");
@@ -35,7 +37,7 @@ public class BooleanSearchEngine implements SearchEngine {
                     }
                     for (String wordToSearch : frequencyMap.keySet()) {
                         List<PageEntry> entries = allWordsEntriesMap.get(wordToSearch);
-                        if (allWordsEntriesMap.get(wordToSearch) == null) {
+                        if (!allWordsEntriesMap.containsKey(wordToSearch)) {
                             entries = new ArrayList<>();
                             entries.add(new PageEntry(pdf.getName(), i, frequencyMap.get(wordToSearch)));
                             allWordsEntriesMap.put(wordToSearch, entries);
@@ -50,29 +52,18 @@ public class BooleanSearchEngine implements SearchEngine {
 
     @Override
     public List<PageEntry> search(String wordsForSearch) {
-        String[] words = wordsForSearch.toLowerCase(Locale.ROOT).split(" ");
-        List<PageEntry> allWordsPageEntries = new ArrayList<>();
-        List<PageEntry> allWordsResult = new ArrayList<>();
-        for (String word : words) {
-            if (allWordsEntriesMap.get(word) != null) {
-                allWordsPageEntries.addAll(new ArrayList<>(allWordsEntriesMap.get(word)));
-            }
-        }
-        Map<String, List<PageEntry>> pdfNameResMap = allWordsPageEntries.stream().collect(Collectors.groupingBy(PageEntry::getPdfName));
-        for (Map.Entry<String, List<PageEntry>> entry : pdfNameResMap.entrySet()) {
-            List<PageEntry> entryList = entry.getValue();
-            Map<String, Map<Integer, Integer>> pageEntryMap = new HashMap<>();
-            for (PageEntry pageEntry : entryList) {
-                pageEntryMap.computeIfAbsent(pageEntry.getPdfName(), v -> new HashMap<>()).merge(pageEntry.getEntryPage(), pageEntry.getCount(), Integer::sum);
-            }
-            pageEntryMap.forEach((pdfName, v) -> {
-                for (var pageCount : v.entrySet()) {
-                    allWordsResult.add(new PageEntry(pdfName, pageCount.getKey(), pageCount.getValue()));
-                }
-            });
-        }
-        allWordsResult.sort(Collections.reverseOrder());
-        return allWordsResult;
+        Set<String> words = new HashSet<>(List.of(wordsForSearch.split(" ")));
+        return allWordsEntriesMap.entrySet().stream()
+                .filter(entry -> words.contains(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .flatMap(List::stream)
+                .collect(groupingBy(PageEntry::getPdfName,
+                        groupingBy(PageEntry::getEntryPage, Collectors.summingInt(PageEntry::getCount))))
+                .entrySet().stream().flatMap(page -> page.getValue()
+                        .entrySet().stream()
+                        .map(pageAndCount -> new PageEntry(page.getKey(), pageAndCount.getKey(), pageAndCount.getValue())))
+                .sorted(Collections.reverseOrder())
+                .collect(Collectors.toList());
     }
 
     private void getStopList() throws IOException {
